@@ -236,6 +236,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.querySelectorAll('.tab').forEach(tab => { 
         tab.addEventListener('click', (e) => { 
+            if (window.justDragged) {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
             e.preventDefault();
 
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active')); 
@@ -282,6 +287,14 @@ document.addEventListener("DOMContentLoaded", () => {
                     if (targetId === 'groupsView' && typeof renderGroups === 'function') renderGroups();
                     if (targetId === 'timelineView' && typeof window.renderTimeline === 'function') window.renderTimeline();
                     if (targetId === 'graphView' && typeof window.initGraphView === 'function') window.initGraphView();
+                    if (targetId === 'usersView' && typeof window.renderUsersTab === 'function') window.renderUsersTab();
+                    if (targetId === 'servicesView' && typeof window.renderServicesTab === 'function') window.renderServicesTab();
+                    if (targetId === 'threadsView' && typeof window.renderNextThreadChunk === 'function') window.renderNextThreadChunk();
+                    if (targetId === 'commentsView' && typeof window.renderNextChunk === 'function') {
+                        document.getElementById('resultsContainer').innerHTML = '';
+                        window.currentDisplayCount = 0;
+                        window.renderNextChunk();
+                    }
                 } catch (err) {
                     console.error("Tab Initialization Error:", err);
                     if (tabLoadingOverlay) tabLoadingOverlay.style.display = 'none';
@@ -448,6 +461,8 @@ document.addEventListener("DOMContentLoaded", () => {
         let touchTimer;
         let draggingTab = null;
         let isTouchDragging = false;
+        window.justDragged = false;
+        let startX, startY;
 
         const handleDragStart = (tab) => {
             draggingTab = tab;
@@ -464,58 +479,59 @@ document.addEventListener("DOMContentLoaded", () => {
             }
             isTouchDragging = false;
             clearTimeout(touchTimer);
+            window.justDragged = true;
+            setTimeout(() => window.justDragged = false, 100);
         };
 
         tabsContainer.querySelectorAll('.tab').forEach(tab => {
-            tab.draggable = true; // Desktop support
+            tab.style.touchAction = 'none'; // Prevent scrolling while dragging
             
-            // Desktop Drag Events
-            tab.addEventListener('dragstart', (e) => {
-                e.dataTransfer.effectAllowed = 'move';
-                handleDragStart(tab);
-            });
-            tab.addEventListener('dragend', handleDragEnd);
-            
-            // Mobile Touch Events (Long Press to drag)
-            tab.addEventListener('touchstart', (e) => {
+            tab.addEventListener('pointerdown', (e) => {
+                if (e.pointerType === 'mouse' && e.button !== 0) return;
+                startX = e.clientX;
+                startY = e.clientY;
+
                 touchTimer = setTimeout(() => {
                     isTouchDragging = true;
                     handleDragStart(tab);
-                }, 500);
-            }, {passive: true});
-            
-            tab.addEventListener('touchmove', (e) => {
-                if(!isTouchDragging) {
-                    clearTimeout(touchTimer);
+                    try { tab.setPointerCapture(e.pointerId); } catch(err) {}
+                }, 500); // 500ms for long press
+            });
+
+            tab.addEventListener('pointermove', (e) => {
+                if (!isTouchDragging) {
+                    if (Math.abs(e.clientX - startX) > 5 || Math.abs(e.clientY - startY) > 5) {
+                        clearTimeout(touchTimer);
+                    }
                     return;
                 }
-                e.preventDefault(); // Prevent scrolling while dragging
-                const touch = e.touches[0];
-                const targetEl = document.elementFromPoint(touch.clientX, touch.clientY);
+                e.preventDefault();
+
+                // Temporarily disable pointer events to find element under cursor
+                tab.style.pointerEvents = 'none';
+                const targetEl = document.elementFromPoint(e.clientX, e.clientY);
+                tab.style.pointerEvents = '';
+
                 const targetTab = targetEl ? targetEl.closest('.tab') : null;
                 
-                if(targetTab && targetTab !== draggingTab) {
+                if (targetTab && targetTab !== draggingTab && draggingTab) {
                     const box = targetTab.getBoundingClientRect();
                     const mid = box.x + box.width / 2;
-                    if(touch.clientX > mid) targetTab.after(draggingTab);
+                    if (e.clientX > mid) targetTab.after(draggingTab);
                     else targetTab.before(draggingTab);
                 }
             });
-            
-            tab.addEventListener('touchend', handleDragEnd);
-            tab.addEventListener('touchcancel', handleDragEnd);
-        });
 
-        // Desktop Drop Zones
-        tabsContainer.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            const targetTab = e.target.closest('.tab');
-            if(targetTab && targetTab !== draggingTab && draggingTab) {
-                const box = targetTab.getBoundingClientRect();
-                const mid = box.x + box.width / 2;
-                if(e.clientX > mid) targetTab.after(draggingTab);
-                else targetTab.before(draggingTab);
-            }
+            const endDrag = (e) => {
+                clearTimeout(touchTimer);
+                if (isTouchDragging) {
+                    try { if (e.pointerId) tab.releasePointerCapture(e.pointerId); } catch(err) {}
+                    handleDragEnd();
+                }
+            };
+
+            tab.addEventListener('pointerup', endDrag);
+            tab.addEventListener('pointercancel', endDrag);
         });
     }
 
