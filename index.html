@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reddit Forensics Analyzer Pro v24.3</title>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js"></script>
+    <link rel="stylesheet" href="styles.css?v=24.3">
+</head>
+<body>
+    <div class="app-container">
+        <header class="glass-panel">
+            <div class="main-controls-row">
+                <h1>Forensics</h1>
+                <div class="core-actions">
+                    <button id="addDataBtn" class="btn btn-primary btn-icon" title="Ingest Data" onclick="document.getElementById('addDataModal').style.display='flex'">+</button>
+                    <input type="file" id="fileInput" accept=".json,.jsonl,.txt,.ndjson" multiple style="display: none;">
+                    
+                    <button id="clearBtn" class="btn btn-danger btn-icon" style="display:none;" title="Clear Database">X</button>
+                    <button id="globalIngestBtn" class="btn btn-secondary btn-icon" style="display:none;" title="Sync newest data via API">S</button>
+                    
+                    <button id="compactToggleBtn" class="btn btn-secondary btn-icon" title="Toggle Book Reading View" style="margin-right: 8px;">R</button>
+                    <button id="sortToggleBtn" class="btn btn-secondary btn-icon" title="Reverse Sort Order" style="display:none; margin-right: 8px;">⇅</button>
+                    <button id="toggleHeaderBtn" class="btn btn-secondary btn-icon" title="Toggle Search & Filters">▼</button>
+                </div>
+            </div>
+
+            <div id="status-container">
+                <div id="status">Ready. Tap '+' to load local data or stream cloud archive.</div>
+                <div id="progress-bar-container"><div id="progress-bar"></div></div>
+                <div id="stream-controls" style="display: none; justify-content: center; gap: 10px; margin-top: 10px;">
+                    <button id="pauseStreamBtn" class="btn btn-secondary btn-compact">Pause</button>
+                    <button id="stopStreamBtn" class="btn btn-danger btn-compact">Stop Stream</button>
+                </div>
+            </div>
+
+            <div id="headerControls" class="control-grid" style="display:none;">
+                <div class="global-search-group" id="searchGroup">
+                    <div class="input-with-btn">
+                        <input type="text" id="searchInput" placeholder='Global Query (User, ID, thread:, sub:, "literal")'>
+                        <button id="searchBtn" class="btn btn-primary">Search</button>
+                        <button id="undoBtn" class="btn btn-danger btn-icon" style="display:none;" title="Undo">U</button>
+                    </div>
+                </div>
+
+                <div class="sub-filter-group" id="subSearchGroup">
+                    <div class="filter-actions-row">
+                        <div id="dateFilterGroup" class="dropdown">
+                            <button id="dateMenuBtn" class="btn btn-secondary btn-compact">Date</button>
+                            <div id="dateDropdown" class="dropdown-content glass-panel">
+                                <label class="glass-label">Start: <span id="startDateLabel"></span></label>
+                                <input type="range" id="startSlider" min="0" max="1000" value="0">
+                                <label class="glass-label" style="margin-top:10px;">End: <span id="endDateLabel"></span></label>
+                                <input type="range" id="endSlider" min="0" max="1000" value="1000">
+                                <div class="dropdown-actions">
+                                    <button id="applyDateBtn" class="btn btn-primary">Apply</button>
+                                    <button id="clearDateBtn" class="btn btn-secondary">Clear</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="gapTestGroup" class="dropdown">
+                            <button id="gapMenuBtn" class="btn btn-secondary btn-compact" onclick="document.getElementById('gapDropdown').classList.toggle('show')">Gap</button>
+                            <div id="gapDropdown" class="dropdown-content glass-panel">
+                                <label class="glass-label">Inactivity Start: <span id="gapStartLabel">...</span></label>
+                                <input type="range" id="gapStartSlider" min="0" max="1000" value="0">
+                                <label class="glass-label" style="margin-top:10px;">Inactivity End: <span id="gapEndLabel">...</span></label>
+                                <input type="range" id="gapEndSlider" min="0" max="1000" value="1000">
+                                <label style="margin-top:10px; display:block;">Filter Results:</label>
+                                <select id="gapFilterSelect">
+                                    <option value="all">Active During Gap (Labels Only)</option>
+                                    <option value="pass">Show Only Silent Users (PASS)</option>
+                                    <option value="fail">Show Only Active Users (FAIL)</option>
+                                </select>
+                                <div class="dropdown-actions">
+                                    <button onclick="window.applyGapTest()" class="btn btn-primary">Evaluate</button>
+                                    <button onclick="window.clearGapTest()" class="btn btn-secondary">Clear</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="exportGroup" class="dropdown">
+                            <button id="exportMenuBtn" class="btn btn-secondary btn-compact">Export</button>
+                            <div id="exportDropdown" class="dropdown-content glass-panel">
+                                <a id="exportToFileBtn">Export View (.json)</a>
+                                <a id="exportToTextBtn">Export View (.txt)</a>
+                                <a id="exportFullDBBtn">Export Master DB (.json / .sql)</a>
+                                <a id="exportTableBtn">Export Current Table (CSV)</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="input-with-btn">
+                        <input type="text" id="subSearchInput" placeholder="Filter current view...">
+                        <button id="subSearchBtn" class="btn btn-secondary">Filter</button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <div class="tabs scroll-hide" id="tabs" style="display:none;">
+            <div class="tab" data-target="timelineView" title="Phase A: Macro Discovery">Timeline</div>
+            <div class="tab" data-target="graphView" title="Phase A: Macro Discovery">Graph</div>
+            <div class="tab" data-target="groupsView" title="Phase A: Macro Discovery">Groups</div>
+            <div class="tab-phase-separator"></div>
+            <div class="tab" data-target="usersView" title="Phase B: Entity Extraction">Users</div>
+            <div class="tab" data-target="entitiesView" title="Phase B: Entity Extraction">Entities</div>
+            <div class="tab" data-target="locationView" title="Phase B: Entity Extraction">Location</div>
+            <div class="tab" data-target="servicesView" title="Phase B: Entity Extraction">Services</div>
+            <div class="tab-phase-separator"></div>
+            <div class="tab" data-target="threadsView" title="Phase C: Micro-Targeting">Threads</div>
+            <div class="tab active" data-target="commentsView" title="Phase C: Micro-Targeting">Comments</div>
+            <div class="tab" data-target="stylometryView" title="Phase C: Micro-Targeting">Stylometry</div>
+            <div class="tab" data-target="wordCloudView" title="Phase C: Micro-Targeting">Keywords</div>
+            <div class="tab" data-target="recentUsersView" title="Phase C: Micro-Targeting">Recent</div>
+            <div class="tab-phase-separator"></div>
+            <div class="tab" data-target="similarityView" title="Phase D: Sock Puppet Attribution">Clones</div>
+            <div class="tab" data-target="compareView" title="Phase D: Sock Puppet Attribution">Compare</div>
+            <div class="tab-phase-separator"></div>
+            <div class="tab" data-target="collectionView" title="Phase E: Intelligence Production">Collection (<span id="collectionCount">0</span>)</div>
+        </div>
+
+        <div class="content-area">
+            <div id="timelineView" class="tab-content">
+                <div class="phase-guide">
+                    <div class="phase-guide-icon">⏳</div>
+                    <div class="phase-guide-content"><b>Phase A: Temporal Matrix</b>Understand When and Where activity occurs. Look for synchronized operational sleep cycles or multi-month deployment gaps.</div>
+                </div>
+                <div id="timeline-container" style="touch-action: none;"></div>
+            </div>
+            <div id="graphView" class="tab-content">
+                <div class="phase-guide">
+                    <div class="phase-guide-icon">🕸️</div>
+                    <div class="phase-guide-content"><b>Phase A: Topological Graph</b>Visualize node overlaps to map out operational cells. Double-click an entity to pivot.</div>
+                </div>
+                <div style="text-align: center; margin-bottom: 15px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
+                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center;">
+                        <button id="renderGraphBtn" class="btn btn-primary">Render Topology</button>
+                        <button id="clusterGraphBtn" class="btn btn-secondary">Auto Cluster (Hubs)</button>
+                        <button id="forensicInferenceBtn" class="btn btn-primary" style="border: 1px solid var(--danger); color: var(--danger);">Run Forensic Inference</button>
+                    </div>
+                    <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap; justify-content: center; background: rgba(30,30,32,0.6); padding: 8px 15px; border-radius: 8px; border: 1px solid var(--border);">
+                        <label style="font-size: 0.85rem; color: var(--text-muted); display:flex; align-items:center; gap:5px; cursor:pointer;">
+                            <input type="checkbox" id="subredditOverlayToggle"> Subreddit Overlay
+                        </label>
+                        <div style="width: 1px; height: 15px; background: var(--border);"></div>
+                        <label style="font-size: 0.85rem; color: var(--text-muted); display:flex; align-items:center;">Edge Threshold: <span id="edgeThresholdValue" style="margin-left:4px; width:12px;">1</span>
+                            <input type="range" id="edgeThresholdSlider" min="1" max="10" value="1" style="width: 80px; margin-left: 8px;">
+                        </label>
+                    </div>
+                    <div id="graphLoadingContainer" style="display: none; width: 100%; max-width: 400px;"><div id="graphStatusText">Calculating...</div><div style="width: 100%; height: 6px; background-color: var(--bg-dark); border-radius: 3px; overflow: hidden;"><div id="graphProgressBar" style="width: 0%; height: 100%; background-color: var(--text-main); transition: width 0.2s;"></div></div></div>
+                </div>
+                <div id="networkMap" class="glass-panel" style="width: 100%; height: 700px; border-radius: 12px; overflow: hidden;"></div>
+            </div>
+            <div id="groupsView" class="tab-content">
+                <div class="phase-guide">
+                    <div class="phase-guide-icon">📊</div>
+                    <div class="phase-guide-content"><b>Phase A: Subreddit Groupings</b>Identify target communities and macro-interaction volumes. Long-press to execute Cloud Ingestion.</div>
+                </div>
+                <div id="groupsContainer"></div>
+            </div>
+
+            <div id="usersView" class="tab-content">
+                <div class="phase-guide">
+                    <div class="phase-guide-icon">👥</div>
+                    <div class="phase-guide-content"><b>Phase B: Target Extraction</b>Aggregate high-volume targets and extract their baseline demographics and inferred genders.</div>
+                </div>
+                <div id="usersContainer"></div>
+                <div id="usersListContainer"></div>
+                <div id="interactionsContainer" style="display:none;">
+                    <div style="text-align: center; margin-bottom: 15px;"><button id="backToUsersBtn" class="btn btn-secondary" style="margin-bottom: 15px;">&larr; Back</button><h3 id="interactionsTitle"></h3></div>
+                    <div class="table-container"><table id="interactionsTable"><thead><tr><th>Co-Participant</th><th>Interactions</th><th>Actions</th></tr></thead><tbody id="interactionsTableBody"></tbody></table></div>
+                </div>
+            </div>
+            <div id="entitiesView" class="tab-content">
+                <div class="phase-guide">
+                    <div class="phase-guide-icon">🔗</div>
+                    <div class="phase-guide-content"><b>Phase B: Indicators of Compromise</b>Isolate precise IOCs (Crypto wallets, Emails, URLs) for external pivoting. Save directly to Collection.</div>
+                </div>
+                <div id="entities-container"></div>
+            </div>
+            <div id="locationView" class="tab-content">
+                <div class="phase-guide">
+                    <div class="phase-guide-icon">📍</div>
+                    <div class="phase-guide-content"><b>Phase B: Geolocation</b>Map geographic slips and localized references extracted directly from the text payload.</div>
+                </div>
+                <div id="location-container"></div><div class="pagination" id="locationPaginationCtrl" style="display:none;"><button id="loadMoreLocationBtn" class="btn btn-secondary">Load More Locations</button></div>
+            </div>
+            <div id="servicesView" class="tab-content">
+                <div class="phase-guide">
+                    <div class="phase-guide-icon">⚠️</div>
+                    <div class="phase-guide-content"><b>Phase B: Services Dictionary</b>Scan for known escort or acronym-based illicit service indicators.</div>
+                </div>
+                <div id="servicesContainer"></div>
+            </div>
+
+            <div id="threadsView" class="tab-content">
+                <div class="phase-guide">
+                    <div class="phase-guide-icon">🧵</div>
+                    <div class="phase-guide-content"><b>Phase C: Thread Convergence</b>Analyze grouped narrative control and multi-actor conversations. Click to expand API context.</div>
+                </div>
+                <div id="threadsContainer"></div>
+                <div class="pagination" id="threadPaginationCtrl" style="display:none;"><button id="loadMoreThreadsBtn" class="btn btn-secondary">Load More Threads</button></div>
+            </div>
+            <div id="commentsView" class="tab-content active">
+                <div class="phase-guide">
+                    <div class="phase-guide-icon">📝</div>
+                    <div class="phase-guide-content"><b>Phase C: Raw Evidence Feed</b>Review granular, timestamped evidence and raw text. Long-press cards to save to locker.</div>
+                </div>
+                <div id="resultsContainer"></div>
+                <div class="pagination" id="paginationCtrl" style="display:none;"><button id="loadMoreBtn" class="btn btn-secondary">Load More Comments</button></div>
+            </div>
+            <div id="stylometryView" class="tab-content">
+                <div class="phase-guide">
+                    <div class="phase-guide-icon">🧬</div>
+                    <div class="phase-guide-content"><b>Phase C: Stylometric Fingerprint</b>Establish a lexical baseline (word length, punctuation density) to detect shared human operators across aliases.</div>
+                </div>
+                <div id="behavioral-container"></div>
+            </div>
+            <div id="wordCloudView" class="tab-content">
+                <div class="phase-guide">
+                    <div class="phase-guide-icon">☁️</div>
+                    <div class="phase-guide-content"><b>Phase C: Lexical Semantics</b>Extract high-frequency terminology and narrative themes from the current operational view.</div>
+                </div>
+                <div id="wordcloud-container"></div>
+            </div>
+            <div id="recentUsersView" class="tab-content">
+                <div class="phase-guide">
+                    <div class="phase-guide-icon">⚡</div>
+                    <div class="phase-guide-content"><b>Phase C: Live Operations</b>Monitor real-time shifts in operational active users within the current filter scope.</div>
+                </div>
+                <div class="table-container"><table id="recentUserTable"><thead><tr><th>User</th><th>Latest Date</th><th>Preview</th><th>Actions</th></tr></thead><tbody id="recentUserTableBody"></tbody></table></div>
+            </div>
+
+            <div id="similarityView" class="tab-content">
+                <div class="phase-guide">
+                    <div class="phase-guide-icon">🎭</div>
+                    <div class="phase-guide-content"><b>Phase D: N-Gram Clone Engine</b>Detect sock puppets using mathematical N-Gram fingerprints overlaid with Astroturf network topology.</div>
+                </div>
+                <div id="similarity-container"></div>
+            </div>
+            <div id="compareView" class="tab-content">
+                <div class="phase-guide">
+                    <div class="phase-guide-icon">⚖️</div>
+                    <div class="phase-guide-content"><b>Phase D: Attribution Matrix</b>Prove shared operators via temporal lockstep visualizations and head-to-head behavioral matrices.</div>
+                </div>
+                <div id="compare-container"></div>
+            </div>
+
+            <div id="collectionView" class="tab-content">
+                <div class="phase-guide">
+                    <div class="phase-guide-icon">🗂️</div>
+                    <div class="phase-guide-content"><b>Phase E: Intelligence Production</b>Run advanced graph transforms on your saved suspects and export the final report findings.</div>
+                </div>
+                <div id="collectionContainer"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="addDataModal" class="glass-overlay" style="display:none; padding: 20px; z-index: 10002;">
+        <div class="glass-panel" style="width:100%; max-width:400px; display:flex; flex-direction:column; border-radius: 16px; padding: 25px; box-shadow: 0 10px 40px rgba(0,0,0,0.8);">
+            <div style="text-align: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; color: var(--text-main); font-weight: 600;">Ingest Data</h2>
+                <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 5px;">Append local files or stream from the cloud.</p>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <label for="fileInput" class="btn btn-primary" style="width: 100%; height: 45px; font-size: 1rem; display:flex; align-items:center; justify-content:center; cursor:pointer;" onclick="document.getElementById('addDataModal').style.display='none'">📄 Append Local JSON/CSV</label>
+                <button onclick="document.getElementById('addDataModal').style.display='none'; document.getElementById('cloudArchiveModal').style.display='flex';" class="btn btn-secondary" style="width: 100%; height: 45px; font-size: 1rem;">☁️ Stream Cloud Archive</button>
+                <button onclick="document.getElementById('addDataModal').style.display='none'" class="btn btn-danger" style="width: 100%; height: 40px; margin-top: 8px;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="cloudArchiveModal" class="glass-overlay" style="display:none; padding: 20px; z-index: 10002;">
+        <div class="glass-panel" style="width:100%; max-width:400px; display:flex; flex-direction:column; border-radius: 16px; padding: 25px;">
+            <div style="text-align: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; color: var(--text-main); font-weight: 600;">Cloud Ingest</h2>
+                <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 5px;">Stream and append historical archives directly into the engine.</p>
+            </div>
+            
+            <div class="control-grid" style="border: none; padding-top: 0; display:flex; flex-direction:column;">
+                <label style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: -5px;">Target Subreddit</label>
+                <input type="text" id="archiveSubInput" placeholder="e.g. OSINT" style="margin-bottom: 10px;">
+                
+                <label style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: -5px;">Start Date</label>
+                <input type="date" id="archiveStartInput" style="margin-bottom: 10px;">
+                
+                <label style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: -5px;">End Date</label>
+                <input type="date" id="archiveEndInput" style="margin-bottom: 15px;">
+            </div>
+            
+            <div style="display: flex; gap: 10px; margin-top: 10px;">
+                <button id="startArchiveBtn" class="btn btn-primary" style="flex: 1;">Begin Streaming</button>
+                <button onclick="document.getElementById('cloudArchiveModal').style.display='none'" class="btn btn-secondary" style="flex: 1;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="tabLoadingOverlay" class="glass-overlay" style="display:none; z-index: 10006;">
+        <div class="glass-panel" style="width: 80%; max-width: 400px; padding: 25px; border-radius: 16px; text-align: center;">
+            <h2 id="tabLoadingTitle" style="margin-top: 0; color: var(--text-main); font-size: 1.2rem;">Processing Models...</h2>
+            <div style="width: 100%; height: 6px; background-color: var(--bg-dark); border-radius: 3px; margin-top: 15px; overflow: hidden;">
+                <div id="tabLoadingBar" style="width: 0%; height: 100%; background-color: var(--primary); transition: width 0.15s ease;"></div>
+            </div>
+            <div id="tabLoadingStatus" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 10px;">Initializing chunk engine...</div>
+            <button id="cancelProcessingBtn" class="btn btn-danger btn-compact" style="margin-top: 15px; width: 100%; display: none;">Stop / Cancel</button>
+        </div>
+    </div>
+    
+    <div id="apiPivotOverlay" class="glass-overlay" style="display:none; z-index: 10004;">
+        <div class="glass-panel" style="width:100%; max-width:800px; max-height:85vh; display:flex; flex-direction:column; border-radius: 16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; padding: 15px; border-bottom:1px solid var(--border);">
+                <h3 id="apiPivotTitle" style="margin:0; color: var(--text-main);">Cloud Context</h3>
+                <button onclick="document.getElementById('apiPivotOverlay').style.display='none'" style="background:transparent; border:none; color:var(--text-muted); font-size:1.8rem; cursor:pointer;">&times;</button>
+            </div>
+            <div id="apiPivotBody" style="padding:15px; overflow-y:auto; flex:1; background: var(--bg-main);"></div>
+        </div>
+    </div>
+    
+    <div id="previewModalOverlay" class="glass-overlay" style="display:none; padding: 20px; z-index: 10002;">
+        <div class="glass-panel" style="width:100%; max-width:800px; max-height:85vh; display:flex; flex-direction:column; border-radius: 16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; padding-bottom:15px; border-bottom:1px solid var(--border);">
+                <h3 id="previewModalTitle" style="margin:0; padding-left: 10px; color: var(--text-main);">Data Preview</h3>
+                <button onclick="document.getElementById('previewModalOverlay').style.display='none'" style="background:transparent; border:none; color:var(--text-muted); font-size:1.8rem; cursor:pointer;">&times;</button>
+            </div>
+            <div id="previewModalBody" style="padding:15px; overflow-y:auto; flex:1;"></div>
+        </div>
+    </div>
+
+    <div id="bootLoadingOverlay" class="glass-overlay" style="z-index: 10010; flex-direction: column; display: none;">
+        <div class="glass-panel" style="width: 80%; max-width: 400px; padding: 25px; border-radius: 16px; text-align: center;">
+            <h2 style="margin-top: 0; color: var(--primary); font-size: 1.2rem;">Booting Engine...</h2>
+            <div style="width: 100%; height: 6px; background-color: var(--bg-dark); border-radius: 3px; margin-top: 15px; overflow: hidden;">
+                <div id="bootLoadingBar" style="width: 0%; height: 100%; background-color: var(--success); transition: width 0.15s ease;"></div>
+            </div>
+            <div id="bootLoadingStatus" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 10px;">Loading persistent database...</div>
+        </div>
+    </div>
+
+    <div id="osintOverlay" class="glass-overlay" style="display:none; z-index: 9999;" onclick="closeContextMenu()"></div>
+    <div id="osintContextMenu" class="bottom-sheet"></div>
+    <div id="microProfileModal" class="glass-overlay" style="display:none; z-index: 10001; flex-direction: column; justify-content: center; align-items: center;"></div>
+    
+    <div id="osintPowerBar">
+        <div style="font-size:0.75rem;"><b>Trail:</b> Ready</div>
+        <div style="font-size:0.75rem;"><b>Locker:</b> <span id="lockerCount">0</span> | <b>Multi:</b> <span id="multiCount">0</span></div>
+    </div>
+
+    <script src="js/state.js?v=24.3"></script>
+    <script src="js/utils.js?v=24.3"></script>
+    <script src="js/parser.js?v=24.3"></script>
+    <script src="js/search.js?v=24.3"></script>
+    <script src="js/render.js?v=24.3"></script>
+    <script src="js/events.js?v=24.3"></script>
+    <script src="js/osint-extensions-core.js?v=24.3"></script>
+    <script src="js/osint-extensions-graph.js?v=24.3"></script>
+    <script src="js/osint-upgrades.js?v=24.3"></script>
+</body>
+</html>
